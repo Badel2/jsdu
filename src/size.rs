@@ -140,7 +140,7 @@ where I: Iterator<Item = (usize, char)>
 
     loop {
         let c = chars.peek();
-        println!("parse_json_size: {:?}", c);
+        //println!("parse_json_size: {:?}", c);
         if c.is_none() {
             break;
         }
@@ -254,6 +254,14 @@ where I: Iterator<Item = (usize, char)>
         // Optional whitespace
         skip_whitespace(chars, &mut key_js);
         let key_ptr = chars.peek().ok_or(())?.0;
+        // Check for } (empty object)
+        match chars.peek().ok_or(())?.1 {
+            '}' => {
+                js.add_stats_from(&key_js);
+                break;
+            }
+            _ => (),
+        }
         // Remove "key"
         parse_string(chars, &mut key_js)?;
         // Optional whitespace
@@ -416,7 +424,6 @@ where I: Iterator<Item = (usize, char)>
         let c = c.unwrap().1;
         len += c.len_utf8();
         if escape_next {
-            len += 1;
             escape_next = false;
             continue;
         }
@@ -617,6 +624,18 @@ mod tests {
     }
 
     #[test]
+    fn test_empty_object() {
+        let json = r#"{}"#;
+        let js = JsonSize::new(json);
+        assert_eq!(js.control_chars, 2);
+        // Only counts whitespace outside of string
+        assert_eq!(js.whitespace, 0);
+        assert_eq!(js.data_size, 0);
+        assert_eq!(js.value_kind, JsonValueKind::Object);
+        assert_eq!(js.children.len(), 0);
+    }
+
+    #[test]
     fn test_object() {
         let json = r#"{"s": "19 character string"}"#;
         let js = JsonSize::new(json);
@@ -638,5 +657,19 @@ mod tests {
         assert_eq!(js.data_size, 19+9+4 + 1+1+7);
         assert_eq!(js.value_kind, JsonValueKind::Object);
         assert_eq!(js.children.len(), 3);
+    }
+
+    #[test]
+    fn fuzz_1() {
+        let json = r#""\\""#;
+        assert_eq!(json.len(), 4);
+        assert_eq!(json.chars().collect::<Vec<_>>(), vec!['"', '\\', '\\', '"']);
+        let js = JsonSize::new(json);
+        assert_eq!(js.control_chars, 2);
+        // Only counts whitespace outside of string
+        assert_eq!(js.whitespace, 0);
+        assert_eq!(js.data_size, 2);
+        assert_eq!(js.value_kind, JsonValueKind::String);
+        assert_eq!(js.children.len(), 0);
     }
 }
