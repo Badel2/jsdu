@@ -67,6 +67,16 @@ impl JsonSize {
             lines
         }
     }
+
+    /// This is not actually RFC JSON PATH, it only allows numbers, like "2/5/15/0"
+    pub fn index_json_path(&mut self, json_path: &str) -> &mut Self {
+        let (first, rest) = json_path.split_once("/").unwrap_or((json_path, ""));
+        let selected: &mut Self = &mut self.children[first.parse::<usize>().unwrap()];
+        if rest != "" {
+            return selected.index_json_path(rest);
+        }
+        selected
+    }
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
