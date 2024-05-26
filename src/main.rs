@@ -64,6 +64,23 @@ pub enum Command {
         #[clap(value_parser)]
         input: PathBuf,
     },
+    /// Minify file and exit. Will remove all whitespace.
+    #[clap(name = "minify", visible_alias = "min")]
+    Minify {
+        /// Input JSON file
+        #[clap(value_parser)]
+        input: PathBuf,
+    },
+    /// Prettify file and exit. Will add whitespaces to make the file more readable.
+    #[clap(name = "prettify", visible_alias = "fmt")]
+    Prettify {
+        /// How many spaces
+        #[clap(long = "indent", default_value_t = 4)]
+        indent: u32,
+        /// Input JSON file
+        #[clap(value_parser)]
+        input: PathBuf,
+    },
 }
 
 fn main() {
@@ -79,6 +96,22 @@ fn main() {
         }
         Command::Show { input, pointer } => {
             show(&input, pointer.as_deref());
+        }
+        Command::Minify { input } => {
+            let json = fs::read_to_string(&input).unwrap();
+            let size_before = json.len();
+            let minified = jsdu::minify::minify(&json);
+            let size_after = minified.len();
+            fs::write(&input, minified).unwrap();
+            println!("minified from {} to {} bytes", size_before, size_after);
+        }
+        Command::Prettify { input, indent } => {
+            let json = fs::read_to_string(&input).unwrap();
+            let size_before = json.len();
+            let prettified = jsdu::prettify::prettify(&json, usize::try_from(indent).unwrap());
+            let size_after = prettified.len();
+            fs::write(&input, prettified).unwrap();
+            println!("prettified from {} to {} bytes", size_before, size_after);
         }
     }
 }
