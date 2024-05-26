@@ -1,6 +1,6 @@
 # jsdu
 
-Like ncdu but for JSON files.
+JSON file size analyzer. Like ncdu but for JSON files.
 
 Ever tried to open a big JSON file with your favorite text editor, only for it to start lagging?
 Maybe it opened fine but it's minified and you don't know what are you looking at?
@@ -14,6 +14,8 @@ cargo install jsdu
 ```
 
 ## Usage
+
+Interactive mode is not implemented yet, but you can do basic stuff using the command line:
 
 ```
 # Open JSON file in interactive mode

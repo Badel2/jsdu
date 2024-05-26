@@ -61,22 +61,48 @@ impl JsonSize {
                         percent[i] = b'#';
                     }
                 }
-                let line = format!("{:12} [{}] {}", size, String::from_utf8(percent).unwrap(), name);
+                let line = format!(
+                    "{:12} [{}] {}",
+                    size,
+                    String::from_utf8(percent).unwrap(),
+                    name
+                );
                 lines.push(line);
             }
             lines
         }
     }
 
-    /// This is not actually RFC JSON PATH, it only allows numbers, like "2/5/15/0"
-    pub fn index_json_path(&mut self, json_path: &str) -> &mut Self {
-        let (first, rest) = json_path.split_once("/").unwrap_or((json_path, ""));
-        let selected: &mut Self = &mut self.children[first.parse::<usize>().unwrap()];
-        if rest != "" {
-            return selected.index_json_path(rest);
+    pub fn index_json_pointer(&mut self, json: &str, pointer: &str) -> Option<&mut Self> {
+        if pointer.is_empty() {
+            return Some(self);
         }
-        selected
+        if !pointer.starts_with('/') {
+            return None;
+        }
+
+        pointer
+            .split('/')
+            .skip(1)
+            .map(|x| x.replace("~1", "/").replace("~0", "~"))
+            .try_fold(self, |target, token| match target.value_kind {
+                JsonValueKind::Object => target
+                    .children
+                    .iter_mut()
+                    .find(|x| x.key.get_key_str(json).unwrap() == token),
+                JsonValueKind::Array => {
+                    parse_index(&token).and_then(|x| target.children.get_mut(x))
+                }
+                _ => None,
+            })
     }
+}
+
+fn parse_index(s: &str) -> Option<usize> {
+    if s.starts_with('+') || (s.starts_with('0') && s.len() != 1) {
+        return None;
+    }
+    s.parse().ok()
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -86,6 +112,15 @@ struct JsonKey {
 }
 
 impl JsonKey {
+    fn get_key_str<'a>(&self, json: &'a str) -> Option<&'a str> {
+        if let Some(key_ptr) = &self.key_ptr {
+            let key_ptr_end = find_string_end(*key_ptr, json);
+            Some(&json[key_ptr.start..key_ptr_end])
+        } else {
+            None
+        }
+    }
+
     fn to_display(&self, json: &str) -> String {
         if let Some(key_ptr) = &self.key_ptr {
             let key_ptr_end = find_string_end(*key_ptr, json);
@@ -134,8 +169,12 @@ enum JsonValueKind {
     Array,
 }
 
-fn parse_json_size<I>(mut chars: &mut Peekable<I>, recursion_level: usize) -> (JsonSize, Option<char>, bool)
-where I: Iterator<Item = (usize, char)>
+fn parse_json_size<I>(
+    mut chars: &mut Peekable<I>,
+    recursion_level: usize,
+) -> (JsonSize, Option<char>, bool)
+where
+    I: Iterator<Item = (usize, char)>,
 {
     let mut js = JsonSize {
         whitespace: 0,
@@ -161,7 +200,11 @@ where I: Iterator<Item = (usize, char)>
                 chars.next().unwrap();
             }
             't' | 'f' | 'n' => {
-                js.value_kind = if c == 'n' { JsonValueKind::Null } else { JsonValueKind::Boolean };
+                js.value_kind = if c == 'n' {
+                    JsonValueKind::Null
+                } else {
+                    JsonValueKind::Boolean
+                };
                 is_empty = false;
                 parse_any_keyword(&mut chars, &mut js).unwrap();
             }
@@ -203,8 +246,13 @@ where I: Iterator<Item = (usize, char)>
     }
 }
 
-fn parse_array<I>(mut chars: &mut Peekable<I>, js: &mut JsonSize, recursion_level: usize) -> Result<(), ()>
-where I: Iterator<Item = (usize, char)>
+fn parse_array<I>(
+    mut chars: &mut Peekable<I>,
+    js: &mut JsonSize,
+    recursion_level: usize,
+) -> Result<(), ()>
+where
+    I: Iterator<Item = (usize, char)>,
 {
     // Save start index
     let data_ptr = chars.peek().ok_or(())?.0;
@@ -217,12 +265,15 @@ where I: Iterator<Item = (usize, char)>
 
     loop {
         let (mut child, last_char, is_empty) = parse_json_size(chars, recursion_level);
-        child.key = JsonKey { index: js.children.len(), key_ptr: None };
+        child.key = JsonKey {
+            index: js.children.len(),
+            key_ptr: None,
+        };
         js.add_stats_from(&child);
         if !is_empty {
             js.children.push(child);
         }
-        
+
         if last_char == Some(',') {
             // Remove comma
             match chars.next().ok_or(())?.1 {
@@ -247,8 +298,13 @@ where I: Iterator<Item = (usize, char)>
     Ok(())
 }
 
-fn parse_object<I>(mut chars: &mut Peekable<I>, js: &mut JsonSize, recursion_level: usize) -> Result<(), ()>
-where I: Iterator<Item = (usize, char)>
+fn parse_object<I>(
+    mut chars: &mut Peekable<I>,
+    js: &mut JsonSize,
+    recursion_level: usize,
+) -> Result<(), ()>
+where
+    I: Iterator<Item = (usize, char)>,
 {
     // Save start index
     let data_ptr = chars.peek().ok_or(())?.0;
@@ -285,12 +341,15 @@ where I: Iterator<Item = (usize, char)>
 
         // Remove value
         let (mut child, last_char, is_empty) = parse_json_size(chars, recursion_level);
-        child.key = JsonKey { index: js.children.len(), key_ptr: Some(Span { start: key_ptr+1 }) };
+        child.key = JsonKey {
+            index: js.children.len(),
+            key_ptr: Some(Span { start: key_ptr + 1 }),
+        };
         js.add_stats_from(&child);
         if !is_empty {
             js.children.push(child);
         }
-        
+
         if last_char == Some(',') {
             // Remove comma
             match chars.next().ok_or(())?.1 {
@@ -316,7 +375,8 @@ where I: Iterator<Item = (usize, char)>
 }
 
 fn parse_number<I>(mut chars: &mut Peekable<I>, js: &mut JsonSize) -> Result<(), ()>
-where I: Iterator<Item = (usize, char)>
+where
+    I: Iterator<Item = (usize, char)>,
 {
     // Save start index
     let data_ptr = chars.peek().ok_or(())?.0;
@@ -416,7 +476,8 @@ where I: Iterator<Item = (usize, char)>
 }
 
 fn parse_string<I>(mut chars: &mut Peekable<I>, js: &mut JsonSize) -> Result<(), ()>
-where I: Iterator<Item = (usize, char)>
+where
+    I: Iterator<Item = (usize, char)>,
 {
     match chars.next().ok_or(())?.1 {
         '"' => (),
@@ -453,18 +514,20 @@ where I: Iterator<Item = (usize, char)>
 }
 
 fn parse_any_keyword<I>(mut chars: &mut Peekable<I>, js: &mut JsonSize) -> Result<(), ()>
-where I: Iterator<Item = (usize, char)>
+where
+    I: Iterator<Item = (usize, char)>,
 {
     match chars.peek().ok_or(())?.1 {
         't' => parse_keyword("true", chars, js),
         'f' => parse_keyword("false", chars, js),
         'n' => parse_keyword("null", chars, js),
-        _ => Err(())
+        _ => Err(()),
     }
 }
 
 fn parse_keyword<I>(keyword: &'static str, mut chars: I, js: &mut JsonSize) -> Result<(), ()>
-where I: Iterator<Item = (usize, char)>
+where
+    I: Iterator<Item = (usize, char)>,
 {
     let keyword_len = keyword.len();
     let mut keyword_chars = keyword.chars();
@@ -485,7 +548,8 @@ where I: Iterator<Item = (usize, char)>
 }
 
 fn skip_whitespace<I>(mut chars: &mut Peekable<I>, js: &mut JsonSize)
-where I: Iterator<Item = (usize, char)>
+where
+    I: Iterator<Item = (usize, char)>,
 {
     loop {
         let c = chars.peek();
@@ -498,14 +562,20 @@ where I: Iterator<Item = (usize, char)>
                 js.whitespace += 1;
                 chars.next().unwrap();
             }
-            _ => return
+            _ => return,
         }
     }
 }
 
 fn assert_total_size_invariant(json: &str, js: &JsonSize) {
     // Invariant: whitespace + control_chars + data_size == input.len()
-    assert_eq!(json.len(), js.whitespace + js.control_chars + js.data_size, "{:?}\n{:?}", json, js);
+    assert_eq!(
+        json.len(),
+        js.whitespace + js.control_chars + js.data_size,
+        "{:?}\n{:?}",
+        json,
+        js
+    );
 }
 
 #[cfg(test)]
@@ -627,7 +697,7 @@ mod tests {
         let js = JsonSize::new(json);
         assert_eq!(js.control_chars, 2);
         // Only counts whitespace outside of string
-        assert_eq!(js.whitespace, 2+3+4);
+        assert_eq!(js.whitespace, 2 + 3 + 4);
         assert_eq!(js.data_size, 0);
         assert_eq!(js.value_kind, JsonValueKind::Array);
         assert_eq!(js.children.len(), 0);
@@ -649,10 +719,10 @@ mod tests {
     fn test_object() {
         let json = r#"{"s": "19 character string"}"#;
         let js = JsonSize::new(json);
-        assert_eq!(js.control_chars, 2+2+2+1);
+        assert_eq!(js.control_chars, 2 + 2 + 2 + 1);
         // Only counts whitespace outside of string
         assert_eq!(js.whitespace, 1);
-        assert_eq!(js.data_size, 19+1);
+        assert_eq!(js.data_size, 19 + 1);
         assert_eq!(js.value_kind, JsonValueKind::Object);
         assert_eq!(js.children.len(), 1);
     }
@@ -661,10 +731,10 @@ mod tests {
     fn test_object_3() {
         let json = r#"{"s": "19 character string", "n": -234.67e9, "boolean": true}"#;
         let js = JsonSize::new(json);
-        assert_eq!(js.control_chars, 2+3+3+3+1+3);
+        assert_eq!(js.control_chars, 2 + 3 + 3 + 3 + 1 + 3);
         // Only counts whitespace outside of string
         assert_eq!(js.whitespace, 5);
-        assert_eq!(js.data_size, 19+9+4 + 1+1+7);
+        assert_eq!(js.data_size, 19 + 9 + 4 + 1 + 1 + 7);
         assert_eq!(js.value_kind, JsonValueKind::Object);
         assert_eq!(js.children.len(), 3);
     }
