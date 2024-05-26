@@ -18,6 +18,13 @@ cargo install jsdu
 Interactive mode is not implemented yet, but you can do basic stuff using the command line:
 
 ```
-# Open JSON file in interactive mode
+# Open JSON file in interactive mode (not implemented yet)
 jsdu bigFile.json
+# Minify/prettify files (in place)
+jsdu min bigFile.json
+jsdu fmt bigFile.json
+# Explore size of JSON structure
+jsdu show bigFile.json
+# JSON Pointers are supported (RFC 6901)
+jsdu show bigFile.json --pointer "/data/0/"
 ```

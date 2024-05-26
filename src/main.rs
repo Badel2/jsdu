@@ -1,5 +1,4 @@
 use clap::Parser;
-use std::env;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -84,14 +83,21 @@ pub enum Command {
 }
 
 fn main() {
-    let mut opt: Args = Args::parse_from(wild::args_os());
+    let opt: Args = Args::parse_from(wild::args_os());
+
+    if opt.command.is_some() {
+        assert!(
+            opt.input.is_none(),
+            "Parse error, input file should be part of subcommand"
+        );
+    }
 
     match opt.command.unwrap_or_else(|| Command::Interactive {
         input: opt
             .input
             .unwrap_or_else(|| panic!("No input file provided")),
     }) {
-        Command::Interactive { input } => {
+        Command::Interactive { input: _ } => {
             unimplemented!("interactive mode not ready :(")
         }
         Command::Show { input, pointer } => {

@@ -509,8 +509,6 @@ where
             return Ok(());
         }
     }
-
-    Ok(())
 }
 
 fn parse_any_keyword<I>(mut chars: &mut Peekable<I>, js: &mut JsonSize) -> Result<(), ()>
